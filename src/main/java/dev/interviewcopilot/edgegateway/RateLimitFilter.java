@@ -24,26 +24,42 @@ class RateLimitFilter implements GlobalFilter, Ordered {
     private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
     private final int requestsPerMinute;
 
-    RateLimitFilter(@Value("${edge.rate-limit.requests-per-minute:600}") int requestsPerMinute) {
+    private final int publicRequestsPerMinute;
+
+    RateLimitFilter(@Value("${edge.rate-limit.requests-per-minute:600}") int requestsPerMinute,
+                    @Value("${edge.rate-limit.public-requests-per-minute:20}") int publicRequestsPerMinute) {
         this.requestsPerMinute = requestsPerMinute;
+        this.publicRequestsPerMinute = publicRequestsPerMinute;
     }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        boolean publicRoute = exchange.getRequest().getPath().value().startsWith("/api/v1/accounts/");
         return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
-                .map(auth -> auth.getName())
-                .defaultIfEmpty("anonymous")
-                .flatMap(user -> allow(user)
+                .map(auth -> "user:" + auth.getName())
+                .defaultIfEmpty("ip:" + clientAddress(exchange))
+                .flatMap(key -> allow(publicRoute ? "public:" + key : key, publicRoute ? publicRequestsPerMinute : requestsPerMinute)
                         ? chain.filter(exchange)
                         : tooManyRequests(exchange));
     }
 
-    private boolean allow(String user) {
+    /** The frontend proxy appends the real client address to X-Forwarded-For; the last entry is the one it added. */
+    private static String clientAddress(ServerWebExchange exchange) {
+        String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            String[] parts = forwarded.split(",");
+            return parts[parts.length - 1].trim();
+        }
+        var remote = exchange.getRequest().getRemoteAddress();
+        return remote == null ? "unknown" : remote.getAddress().getHostAddress();
+    }
+
+    private boolean allow(String key, int limit) {
         long minute = System.currentTimeMillis() / 60_000;
-        Window window = windows.compute(user, (k, w) -> w == null || w.minute() != minute
+        Window window = windows.compute(key, (k, w) -> w == null || w.minute() != minute
                 ? new Window(minute, new AtomicInteger()) : w);
-        return window.count().incrementAndGet() <= requestsPerMinute;
+        return window.count().incrementAndGet() <= limit;
     }
 
     private static Mono<Void> tooManyRequests(ServerWebExchange exchange) {

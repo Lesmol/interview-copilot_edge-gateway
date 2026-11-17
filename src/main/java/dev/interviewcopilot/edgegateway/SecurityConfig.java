@@ -29,6 +29,8 @@ class SecurityConfig {
                 .authorizeExchange(auth -> auth
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers("/actuator/health/**").permitAll()
+                        // Sign-up and password reset happen before there is a token.
+                        .pathMatchers(HttpMethod.POST, "/api/v1/accounts/**").permitAll()
                         .anyExchange().hasAuthority("SCOPE_" + USER_SCOPE))
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();

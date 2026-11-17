@@ -16,13 +16,14 @@ spring:
             - id: bff-api
               uri: ${BFF_URL:http://localhost:8082}
               predicates:
-                - Path=/api/**
+                - Path=/api/v1/**
 
 edge:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   rate-limit:
     requests-per-minute: ${RATE_LIMIT_PER_MINUTE:600}
+    public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:20}
 
 management:
   endpoints:

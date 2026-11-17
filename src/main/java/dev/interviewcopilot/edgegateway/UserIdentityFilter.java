@@ -23,13 +23,14 @@ class UserIdentityFilter implements GlobalFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        // Whatever the client sent is dropped, on public routes too; only a validated token sets the header.
         return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
                 .filter(JwtAuthenticationToken.class::isInstance)
                 .map(auth -> ((Jwt) auth.getPrincipal()).getSubject())
-                .map(subject -> forward(exchange, subject))
-                .defaultIfEmpty(exchange)
-                .flatMap(chain::filter);
+                .map(java.util.Optional::of)
+                .defaultIfEmpty(java.util.Optional.empty())
+                .flatMap(subject -> chain.filter(forward(exchange, subject.orElse(null))));
     }
 
     private static ServerWebExchange forward(ServerWebExchange exchange, String subject) {
@@ -37,7 +38,7 @@ class UserIdentityFilter implements GlobalFilter, Ordered {
                 .headers(h -> {
                     h.remove(USER_ID_HEADER);
                     h.remove(HttpHeaders.AUTHORIZATION);
-                    h.set(USER_ID_HEADER, subject);
+                    if (subject != null) h.set(USER_ID_HEADER, subject);
                 }).build();
         return exchange.mutate().request(request).build();
     }
